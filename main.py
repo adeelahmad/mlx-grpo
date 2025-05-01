@@ -1,4 +1,4 @@
-# mlx_grpo_trainer_aligned.py
+# main.py
 import traceback
 import json
 import random
@@ -492,7 +492,7 @@ def calculate_total_reward(
                 # Assuming calculate_reward returns a tuple (reward, weight)
                 external_rew, external_rew_weight = EXRERNAL_REWARD_FN.calculate_reward(
                     generated_text, reference_answer_str
-                )
+                )[0], 0.15
                 logger.debug(
                     f"External Reward: {external_rew:.4f} (Weight: {external_rew_weight:.2f})"
                 )
@@ -666,7 +666,7 @@ class TrainingArgs:
         },
     )
     max_gen_len: int = field(
-        default=512,
+        default=150,
         metadata={"help": "Maximum number of tokens to generate during rollout."},
     )
     system_prompt: Optional[str] = field(
