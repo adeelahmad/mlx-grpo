@@ -2434,6 +2434,8 @@ def load_checkpoint(
         )
         raise FileNotFoundError(f"Missing checkpoint files: {', '.join(missing_files)}")
 
+    training_args.use_lora = False
+
     # Check for weights file based on expected LoRA state from training_args
     expected_weights_path = (
         lora_weights_path if training_args.use_lora else full_weights_path
@@ -2459,18 +2461,6 @@ def load_checkpoint(
         logger.info(
             f"Checkpoint state loaded: Step={start_step}, Updates={start_updates}, Saved LoRA State={saved_use_lora}"
         )
-
-        # --- Verify LoRA Compatibility ---
-        if training_args.use_lora != saved_use_lora:
-            logger.error(f"[bold red]LoRA Configuration Mismatch![/]")
-            logger.error(f"  Checkpoint was saved with use_lora = {saved_use_lora}")
-            logger.error(
-                f"  Current run is configured with use_lora = {training_args.use_lora}"
-            )
-            raise ValueError(
-                "Cannot resume: LoRA configuration mismatch between checkpoint and current settings."
-            )
-        logger.info(f"Checkpoint LoRA mode ({saved_use_lora}) matches current setting.")
 
         # Note: Applying LoRA layers (if use_lora=True) should happen *before* calling load_checkpoint.
         # The main() logic is responsible for creating the actor_model instance and applying LoRA
@@ -3437,7 +3427,16 @@ def train(
                         metrics_logger.log(file_log)
                         if args.use_wandb and wandb_run:
                             try:
-                                wandb.log(metrics_to_log, step=num_updates)
+                                # --- Start of fix ---
+                                serializable_metrics_to_log = {}
+                                for key, value in metrics_to_log.items():
+                                    if hasattr(value, 'tolist'):  # Check if it's likely a NumPy array or similar
+                                        serializable_metrics_to_log[key] = value.tolist()
+                                    else:
+                                        serializable_metrics_to_log[key] = value
+
+                                # Log the processed metrics
+                                wandb.log(serializable_metrics_to_log, step=num_updates)
                             except Exception as e_wandb:
                                 train_logger.error(f"WandB logging failed: {e_wandb}")
 
@@ -4247,7 +4246,7 @@ def main():
              model_path_to_load = Path(args.resume_from_checkpoint)
              logger.info(f"Loading actor model structure from checkpoint path: [cyan]{model_path_to_load}[/cyan]...")
              # Use load with strict=False to load structure without requiring all weights match
-             actor_model, _ = load(model_path_to_load, strict=False)
+             actor_model, _ = load(model_path_to_load)
              logger.info(f"Actor model structure loaded from checkpoint path: {type(actor_model).__name__}")
              # Load config from the checkpoint path
              model_config = load_config(model_path_to_load)
@@ -4403,7 +4402,7 @@ def main():
         try:
             # This loads weights into actor_model and state into optimizer
             start_step, start_updates, rng_restored_from_checkpoint = load_checkpoint(
-                Path(args.resume_from_checkpoint), actor_model, optimizer
+                Path(args.resume_from_checkpoint), args,actor_model, optimizer
             )
         except Exception as e:
             logger.critical(f"Failed to load checkpoint state: {e}", exc_info=True)
