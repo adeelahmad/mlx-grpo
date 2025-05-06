@@ -390,53 +390,79 @@ def jaccard_reward(
 ) -> float:
     """
     Assigns reward based on the Jaccard Similarity between the token sets
-    of the text within <answer> tags and the reference completion string. Gives score 0-1.
+    of the extracted answer text and the reference completion string.
+    The answer is considered anything after the last '</thinking>\\n' sequence.
+    Gives score 0-1.
     """
-    import string # Ensure string is imported here if not globally
+    import string # Local import as in the original snippet
+
+    logger.debug("Jaccard Reward: Evaluation started.")
+    logger.debug(f"Jaccard Reward: Full input text: '{text}'")
+    logger.debug(f"Jaccard Reward: Reference completion: '{reference_completion}'")
 
     if reference_completion is None:
-        logger.debug("Jaccard Reward: No reference completion provided.")
+        logger.debug("Jaccard Reward: No reference completion provided. Returning 0.0.")
         return 0.0
 
-    start_tag_esc = re.escape(config.answer_start_tag.strip())
-    end_tag_esc = re.escape(config.answer_end_tag.strip())
-    pattern = rf"{start_tag_esc}\s*(.*?)\s*{end_tag_esc}"
-    match = re.search(pattern, text, re.DOTALL | re.IGNORECASE)
+    # Task 2: New answer extraction logic
+    # The answer is anything after the last occurrence of '</thinking>\n'.
+    # The content within <thinking>...</thinking> is ignored for the answer itself.
+    thinking_end_marker = "</thinking>\n"
+    marker_position = text.rfind(thinking_end_marker) # Use rfind for the last occurrence
 
-    if not match:
-        logger.debug("Jaccard Reward: <answer> tags not found or pattern mismatch.")
-        return 0.0
+    if marker_position == -1:
+        logger.debug(f"Jaccard Reward: Marker '{thinking_end_marker}' not found. No answer extracted based on this rule.")
+        extracted_answer = "" # If marker is not found, consider extracted answer as empty
+    else:
+        extracted_answer = text[marker_position + len(thinking_end_marker):].strip()
 
-    extracted_answer = match.group(1).strip()
+    # Task 1: Log the extracted (generated) answer for debugging
+    logger.debug(f"Jaccard Reward: Extracted answer for Jaccard comparison: '{extracted_answer}'")
 
     def preprocess_text(input_text: str) -> set:
         if not isinstance(input_text, str):
             logger.debug(
-                f"Jaccard preprocess_text: Input is not a string ({type(input_text)}). Returning empty set."
+                f"Jaccard preprocess_text: Input is not a string ({type(input_text)} '{input_text}'). Returning empty set."
             )
             return set()
+        if not input_text.strip(): # Handle empty or whitespace-only strings
+            return set()
         text_lower = input_text.lower()
-        text_no_punct = re.sub(
-            r"[%s]+" % re.escape(string.punctuation), " ", text_lower
-        )
+        # Remove punctuation by replacing it with spaces, then split and form a set
+        text_no_punct = re.sub(r"[%s]+" % re.escape(string.punctuation), " ", text_lower)
         tokens = set(text_no_punct.split())
         return tokens
 
     generated_tokens = preprocess_text(extracted_answer)
     reference_tokens = preprocess_text(reference_completion)
 
+    logger.debug(f"Jaccard Reward: Processed generated tokens: {generated_tokens}")
+    logger.debug(f"Jaccard Reward: Processed reference tokens: {reference_tokens}")
+
+    # Jaccard similarity calculation
     if not generated_tokens and not reference_tokens:
-        return 1.0
+        logger.debug("Jaccard Reward: Both generated and reference tokens are empty. Returning 1.0.")
+        return 1.0  # If both are effectively empty, they are identical.
+
+    # If one is empty and the other is not, Jaccard similarity is 0.
+    # This also covers the case where extracted_answer was "" and reference_completion was not.
     if not generated_tokens or not reference_tokens:
+        logger.debug("Jaccard Reward: One set of tokens is empty, the other is not. Returning 0.0.")
         return 0.0
 
     intersection = generated_tokens.intersection(reference_tokens)
     union = generated_tokens.union(reference_tokens)
 
-    if not union:
+    # Denominator `union` should not be empty here due to previous checks,
+    # but as a safeguard:
+    if not union: # This case should ideally not be reached if previous checks are correct
+        logger.warning("Jaccard Reward: Union of tokens is empty unexpectedly. Returning 0.0.")
         return 0.0
     else:
         jaccard_score = len(intersection) / len(union)
+        logger.debug(
+            f"Jaccard Reward: Intersection: {len(intersection)}, Union: {len(union)}, Score: {jaccard_score:.4f}"
+        )
         return float(jaccard_score)
 
 
